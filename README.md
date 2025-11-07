@@ -38,13 +38,11 @@ Two classification frameworks extend the reconstruction model for downstream ana
 
 ### (a) Camo Classification
 Binary CNN distinguishing camouflaged vs. non-camouflaged scenes under three modalities:  
-**SPEC** (spectral only), **POL** (polarization only), and **SPECPOL** (fused).  
-Implements consistent architecture across modalities for controlled comparison.  
+**SPEC** (spectral only), **POL** (polarization only), and **SPECPOL** (fused). Implements consistent architecture across modalities for controlled comparison.  
 **Key file:** `Classification/Camo_Classification/Camo_Encoder.py`
 
 ### (b) Textile Classification
-Multi-class encoder for textile material identification (e.g., cotton, felt, nylon).  
-Features derived from reconstructed hyperspectral cubes are processed through a 1-D attention-based encoder network.  
+Multi-class encoder for textile material identification (e.g., cotton, felt, nylon). Features derived from reconstructed hyperspectral cubes are processed through a 1-D attention-based encoder network.  
 **Key files:**  
 - `Textile_Feature_builder.py` — feature construction  
 - `Textile_ResNet.py` — lightweight encoder with depthwise separable convolutions
@@ -62,8 +60,7 @@ For researchers seeking access to the **original training data** used in this wo
 **Max T. Krauss** — maxtkrauss@gmail.com  
 Department of Electrical and Computer Engineering, University of Utah  
 
-All distributed materials and code are governed by the **4DCam Research License (Version 1.0, 2025)**, which restricts use to academic and non-commercial research purposes.  
-Please review the license terms before requesting or redistributing any portion of the data or trained models.
+All distributed materials and code are governed by the **4DCam Research License (Version 1.0, 2025)**, which restricts use to academic and non-commercial research purposes. Please review the license terms before requesting or redistributing any portion of the data or trained models.
 
 If this code or dataset contributes to your research, please cite the following manuscript:
 
