@@ -1,0 +1,37 @@
+4DCam Research License (Version 1.0, 2025)
+
+Copyright (c) 2025
+Max T. Krauss, William Walker, Alexander Ingold, Jakob Dammann,
+Apratim Majumder, and Rajesh Menon
+University of Utah, USA
+Georg-August-Universität Göttingen, Germany
+
+All rights reserved.
+
+Permission is hereby granted, free of charge, to academic and research institutions
+to use, reproduce, and modify this software for non-commercial research purposes,
+subject to the following conditions:
+
+1. This license applies solely to academic and non-commercial research use.
+   Commercial use requires prior written permission from the corresponding author,
+   Prof. Rajesh Menon (rmenon@eng.utah.edu).
+
+2. The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the software.
+
+3. Publications, presentations, or derivative works based on this software must
+   cite the following reference:
+
+   Krauss, M. T., Walker, W., Ingold, A., Dammann, J., Majumder, A., & Menon, R.
+   "Four-dimensional video imaging via generative deep learning and a diffuser-encoded image sensor"
+   (Manuscript in preparation, 2025)
+
+4. The software is provided "as is", without warranty of any kind, express or implied,
+   including but not limited to the warranties of merchantability, fitness for a particular purpose,
+   and noninfringement. In no event shall the authors or their institutions be liable for any claim,
+   damages, or other liability, whether in an action of contract, tort, or otherwise,
+   arising from, out of, or in connection with the software or the use or other dealings in the software.
+
+For commercial licensing or collaborations, contact:
+Prof. Rajesh Menon — Department of Electrical and Computer Engineering,
+University of Utah (rmenon@eng.utah.edu)

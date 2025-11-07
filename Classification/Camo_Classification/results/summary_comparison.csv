@@ -1,0 +1,16 @@
+modality,fold,val_acc,val_auc,val_f1,ckpt
+SPEC,0,0.7,0.9099999666213989,0.8571428565623582,checkpoints_2D/spec/spec_fold0.pth
+SPEC,1,0.6,0.940000057220459,0.9523809517913832,checkpoints_2D/spec/spec_fold1.pth
+SPEC,2,0.95,0.9800000190734863,0.8999999994099999,checkpoints_2D/spec/spec_fold2.pth
+SPEC,3,0.85,0.9700000286102295,0.9523809517913832,checkpoints_2D/spec/spec_fold3.pth
+SPEC,4,0.9,0.9900000095367432,0.9473684204542937,checkpoints_2D/spec/spec_fold4.pth
+POL,0,0.75,0.8899999856948853,0.8999999994099999,checkpoints_2D/pol/pol_fold0.pth
+POL,1,0.8,0.9099999666213989,0.8695652168241965,checkpoints_2D/pol/pol_fold1.pth
+POL,2,0.85,0.9800000190734863,0.9523809517913832,checkpoints_2D/pol/pol_fold2.pth
+POL,3,0.9,0.940000057220459,0.9090909085123966,checkpoints_2D/pol/pol_fold3.pth
+POL,4,0.75,0.8999999761581421,0.8571428565623582,checkpoints_2D/pol/pol_fold4.pth
+SPECPOL,0,0.85,0.9300000071525574,0.8999999994099999,checkpoints_2D/specpol/specpol_fold0.pth
+SPECPOL,1,0.75,0.940000057220459,0.8695652168241965,checkpoints_2D/specpol/specpol_fold1.pth
+SPECPOL,2,0.85,0.9800000190734863,0.9090909085123966,checkpoints_2D/specpol/specpol_fold2.pth
+SPECPOL,3,0.85,1.0,0.9999999994,checkpoints_2D/specpol/specpol_fold3.pth
+SPECPOL,4,0.8,0.9399999380111694,0.8999999994099999,checkpoints_2D/specpol/specpol_fold4.pth
