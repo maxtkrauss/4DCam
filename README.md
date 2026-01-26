@@ -51,6 +51,29 @@ Both modules include cross-validation, confusion-matrix visualization, and summa
 
 ---
 
+
+## 3. Spatial Super Resolution via Multiplicative Fusion
+
+The **Multiplicative Fusion** method enables spatial super-resolution of hyperspectral–polarimetric cubes by fusing low-resolution reconstructions with high-resolution broadband (scatterogram) images. This approach preserves spectral information while enhancing spatial detail, using a smooth gain field (proportion map) to transfer fine structure from the high-res image to each spectral channel.
+
+**Implementation:**
+- The core implementation is in `Multiplicative Fusion/Multiplicative Fusion.py`.
+- The main function loads and preprocesses the input images, computes a smooth multiplicative proportion map, upsamples the low-res cube, and saves the super-resolved datacube.
+- Two methods are available:
+  - `"smooth_multiplicative"` (recommended): Applies a smoothed, block-conservative proportion map for each channel.
+  - `"spectral_sum_weights"`: Uses normalized spectral weights for upsampling (not utilized).
+
+**How to use:**
+1. Import the `main` function from `Multiplicative Fusion.py`.
+2. Call `main()` with the following arguments:
+   - `cubert_path`: path to the low-resolution hyperspectral–polarimetric cube
+   - `thorlabs_path`: path to the high-resolution compressed image
+   - `output_path`: desired output file path
+   - `method`: "smooth_multiplicative" (recommended) or "spectral_sum_weights"
+   - Additional parameters: `thorlabs_channel`, `cubert_bit_depth`, `thorlabs_bit_depth`, `output_size`, `block_size`, `save_as_16bit`, etc.
+
+The function will handle all loading, preprocessing, fusion, verification, and saving of the super-resolved datacube.
+
 ---
 
 ## Extension and Contact
@@ -66,7 +89,7 @@ If this code or dataset contributes to your research, please cite the following 
 
 > **Krauss, M. T.**, Walker, W., Ingold, A., Dammann, J., Majumder, A., & Menon, R.  
 > *"Four-dimensional video imaging via generative deep learning and a diffuser-encoded image sensor."*  
-> (Manuscript in preparation, 2025)
+> (Manuscript in preparation, 2026)
 
 ---
 
