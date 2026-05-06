@@ -7,10 +7,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage import io
 import torch.nn.functional as F
+from data.input_perturbations import apply_optional_input_shift, build_aligned_samples
 
 # Load the cropped master dark frames (only once, outside __getitem__)
-thorlabs_dark_cropped = np.load("/scratch/general/nfs1/u1528328/img_dir/dark_frames/thorlabs_display_masterdark_cropped.npy")  # Shape: (5, 660, 660)
-cubert_dark_cropped = np.load("/scratch/general/nfs1/u1528328/img_dir/dark_frames/cubert_display_masterdark_cropped.npy")  # Shape: (106, 120, 120)
+#thorlabs_dark_cropped = np.load("/scratch/general/nfs1/u1528328/img_dir/dark_frames/thorlabs_display_masterdark_cropped.npy")  # Shape: (5, 660, 660)
+#cubert_dark_cropped = np.load("/scratch/general/nfs1/u1528328/img_dir/dark_frames/cubert_display_masterdark_cropped.npy")  # Shape: (106, 120, 120)
 
 import cv2
 
@@ -19,6 +20,99 @@ def upsample_bicubic(hsi, target_size=(660, 660)):
     for i in range(hsi.shape[0]):
         upsampled[i] = cv2.resize(hsi[i], target_size, interpolation=cv2.INTER_CUBIC)
     return upsampled
+
+
+MODEL_SHAPE_SPECS = {
+    'unet_128': {'input_hw': (128, 128), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'unet_256': {'input_hw': (256, 256), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'unet_512': {'input_hw': (512, 512), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'unet_1024': {'input_hw': (1024, 1024), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'unet_1024_mod': {'input_hw': (1024, 1024), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'unet_1024_to_256': {'input_hw': (1024, 1024), 'target_hw': (256, 256), 'target_mode': 'resize'},
+    'unet_2048': {'input_hw': (2048, 2048), 'target_hw': (410, 410), 'target_mode': 'strict'},
+    'nafnet_128': {'input_hw': (128, 128), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'nafnet_256': {'input_hw': (256, 256), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'nafnet_512': {'input_hw': (512, 512), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+    'nafnet_1024': {'input_hw': (1024, 1024), 'target_hw': (128, 128), 'target_mode': 'pad_120_to_128'},
+}
+
+
+def _shape3(x):
+    return tuple(int(v) for v in x.shape[-3:])
+
+
+def _shape_error(netG, actual_A, actual_B, expected_A, expected_B, A_path, B_path, detail):
+    return (
+        f"Shape contract failed for netG='{netG}': {detail}\n"
+        f"  required input A:  ({expected_A[0]}, {expected_A[1]}, {expected_A[2]})\n"
+        f"  actual input A:    {actual_A}\n"
+        f"  required target B: ({expected_B[0]}, {expected_B[1]}, {expected_B[2]})\n"
+        f"  actual target B:   {actual_B}\n"
+        f"  A_path: {A_path}\n"
+        f"  B_path: {B_path}"
+    )
+
+
+def _get_shape_spec(opt):
+    if opt.netG not in MODEL_SHAPE_SPECS:
+        choices = ', '.join(sorted(MODEL_SHAPE_SPECS))
+        raise NotImplementedError(
+            f"Generator model name '{opt.netG}' is not recognized in aligned_dataset.py. "
+            f"Known model shape specs: {choices}"
+        )
+    spec = dict(MODEL_SHAPE_SPECS[opt.netG])
+    if opt.GT_upsample:
+        spec['target_hw'] = (660, 660)
+        spec['target_mode'] = 'resize'
+    return spec
+
+
+def _prepare_target(B, spec, netG, expected_channels, B_path):
+    target_hw = spec['target_hw']
+    target_mode = spec['target_mode']
+    actual = _shape3(B)
+
+    if actual[0] != expected_channels:
+        raise ValueError(
+            f"Shape contract failed for netG='{netG}': target B must have "
+            f"{expected_channels} channels before model-specific resizing, got {actual[0]}.\n"
+            f"  B_path: {B_path}"
+        )
+
+    if target_mode == 'pad_120_to_128':
+        if actual[-2:] == target_hw:
+            return B
+        if actual[-2:] != (120, 120):
+            raise ValueError(
+                f"Shape contract failed for netG='{netG}': target B must be "
+                f"({expected_channels}, 120, 120) or ({expected_channels}, 128, 128), got {actual}.\n"
+                f"  B_path: {B_path}"
+            )
+        return np.pad(B, ((0, 0), (4, 4), (4, 4)), mode='constant', constant_values=0)
+
+    if target_mode == 'strict':
+        if actual[-2:] != target_hw:
+            raise ValueError(
+                f"Shape contract failed for netG='{netG}': this full-resolution architecture "
+                f"requires target B shape ({expected_channels}, {target_hw[0]}, {target_hw[1]}), got {actual}.\n"
+                f"  B_path: {B_path}"
+            )
+        return B
+
+    if target_mode == 'resize':
+        if actual[-2:] == target_hw:
+            return B
+        return upsample_bicubic(B, target_hw)
+
+    raise ValueError(f"Unknown target preparation mode '{target_mode}' for netG='{netG}'.")
+
+
+def _resize_input(A, target_hw):
+    A = A.unsqueeze(0)
+    if tuple(A.shape[-2:]) != target_hw:
+        A = F.interpolate(A, size=target_hw, mode='bilinear', align_corners=False)
+    return A.squeeze(0)
+
 
 class AlignedDataset(BaseDataset):
     """A dataset class for paired image dataset.
@@ -33,13 +127,26 @@ class AlignedDataset(BaseDataset):
         opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
         BaseDataset.__init__(self, opt)
-        self.dir_A = os.path.join(opt.dataroot, opt.phase, 'thorlabs')
-        self.dir_B = os.path.join(opt.dataroot, opt.phase, 'cubert')
-
-        self.A_paths = sorted(make_dataset(self.dir_A, opt.max_dataset_size))   # load images from '/path/to/data/trainA'
-        self.B_paths = sorted(make_dataset(self.dir_B, opt.max_dataset_size))    # load images from '/path/to/data/trainB'
-        self.A_size = len(self.A_paths)  # get the size of dataset A
-        self.B_size = len(self.B_paths)  # get the size of dataset B
+        self.samples = build_aligned_samples(opt)
+        if not self.samples:
+            diagnostics = getattr(opt, 'aligned_sample_diagnostics', [])
+            detail_lines = [
+                f"AlignedDataset found zero samples for dataroot='{opt.dataroot}', phase='{opt.phase}', video_mode={opt.video_mode}.",
+                "Expected folders are '<dataroot>/<phase>/thorlabs' and, unless video_mode=True, '<dataroot>/<phase>/cubert'.",
+            ]
+            for diag in diagnostics:
+                detail_lines.extend([
+                    f"  dataroot: {diag['dataroot']}",
+                    f"    A/thorlabs: {diag['dir_A']} exists={diag['dir_A_exists']} files={diag['a_count']}",
+                    f"    B/cubert:   {diag['dir_B']} exists={diag['dir_B_exists']} files={diag['b_count']}",
+                    f"    usable pairs: {diag['pair_count']}",
+                ])
+            if not diagnostics:
+                detail_lines.append("  No dataroots were inspected.")
+            detail_lines.append("For full-field video-only inference, set the DATASETS entry to video_mode=True. For alternate folder names, set phase/train_phase/test_phase in DATASETS.")
+            raise ValueError("\n".join(detail_lines))
+        self.A_size = len(self.samples)
+        self.B_size = len(self.samples)
 
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
         self.output_nc = self.opt.input_nc if self.opt.direction == 'BtoA' else self.opt.output_nc
@@ -49,6 +156,8 @@ class AlignedDataset(BaseDataset):
         self.video_mode = opt.video_mode
         self.GT_upsample = opt.GT_upsample
         self.norm_bitwise = opt.norm_bitwise
+        self.shape_spec = _get_shape_spec(opt)
+        self.expected_target_nc = opt.output_nc // 2 if getattr(opt, 'use_nll', False) else opt.output_nc
 
     def __getitem__(self, index):
         """Return a data point and its metadata information.
@@ -86,17 +195,17 @@ class AlignedDataset(BaseDataset):
             B_images.append(B_image)
 '''
         
-        A_path = self.A_paths[index % self.A_size]
+        sample = self.samples[index % self.A_size]
+        A_path = sample['A_path']
         A = io.imread(A_path).astype(np.float32)  # Shape: (5, 660, 660)
         
         if self.video_mode == False:
-            index_B = index % self.B_size
-            B_path = self.B_paths[index_B]
+            B_path = sample['B_path']
             B = io.imread(B_path).astype(np.float32)  # Shape: (106, 120, 120)
-
-        if self.video_mode == True:
-            # Set dummy tensor
-            B = torch.zeros((106, 120, 120), dtype=torch.float32)  # Dummy tensor with expected shape
+        else:
+            B_path = 'dummy'
+            target_h, target_w = self.shape_spec['target_hw']
+            B = np.zeros((self.expected_target_nc, target_h, target_w), dtype=np.float32)
 
         #print(f'A path: {A_path}')
         #print(f'B path: {B_path}')
@@ -127,53 +236,56 @@ class AlignedDataset(BaseDataset):
         if self.polarization == 135:
             A = A[3:4, :, :] # Shape: (1, 660, 660) (135 degree pol)
 
-        if self.GT_upsample:
-            # Modify ground-truth size (bicubic interpolation)     
-            B = upsample_bicubic(B, (660,660)) # Shape: (106, 660, 660)
-        else:
-            # Modify ground-truth size (padding)
-            B = np.pad(B, ((0, 0), (4, 4), (4, 4)), mode='constant', constant_values=0) # Shape: 106x128x128
+        A, shift_meta = apply_optional_input_shift(A, self.opt)
 
+        B = _prepare_target(B, self.shape_spec, self.opt.netG, self.expected_target_nc, B_path)
 
-        
         A = torch.from_numpy(A).float()
         B = torch.from_numpy(B).float()
-        # interpolated B instead of pad
-        # B = B.unsqueeze(0)
-        # B = F.interpolate(B, size=(128, 128), mode='bilinear', align_corners=False)
-        # B = B.squeeze(0)
 
-        #A = torch.from_numpy(A).float()
-        #B = torch.from_numpy(B).float()
-
-        netG = self.opt.netG
-
-        A = A.unsqueeze(0)  # Add batch dimension
-        if netG == 'unet_128':
-            A = F.interpolate(A, size=(128, 128), mode='bilinear', align_corners=False)
-        elif netG == 'unet_256':
-            A = F.interpolate(A, size=(256, 256), mode='bilinear', align_corners=False)
-        elif netG == 'unet_512':
-            # A = F.interpolate(A, size=(512, 512), mode='bilinear', align_corners=False)
-            print("foo")
-        elif netG == 'unet_1024' or netG == 'unet_1024_mod':
-                A = F.interpolate(A, size=(1024, 1024), mode='bilinear', align_corners=False)
-                # pass
-        else:
-            raise NotImplementedError('Generator model name [%s] is not recognized in aligned_dataset.py' % netG)
-        #A = F.interpolate(A, size=(1024, 1024), mode='bilinear', align_corners=False) # Resize to 120x120
-        A = A.squeeze(0)  # Remove batch dimension
-
-        # print(f"Final A shape: {A.shape}, Final B shape: {B.shape}")
+        A = _resize_input(A, self.shape_spec['input_hw'])
+        expected_A = (self.input_nc, *self.shape_spec['input_hw'])
+        expected_B = (self.expected_target_nc, *self.shape_spec['target_hw'])
+        if _shape3(A) != expected_A or _shape3(B) != expected_B:
+            raise ValueError(
+                _shape_error(
+                    self.opt.netG,
+                    _shape3(A),
+                    _shape3(B),
+                    expected_A,
+                    expected_B,
+                    A_path,
+                    B_path,
+                    'dataloader preprocessing produced incompatible tensors',
+                )
+            )
 
         #print(f'A_paths: {A_path} B_paths: {B_path}')
         # print(A.shape)
         # print(B.shape)
 
         if self.video_mode == True:
-            return {'A': A, 'B': B, 'A_paths': A_path, 'B_paths': 'dummy'}
+            return {
+                'A': A,
+                'B': B,
+                'A_paths': A_path,
+                'B_paths': 'dummy',
+                'is_shifted': torch.tensor(shift_meta['is_shifted'], dtype=torch.float32),
+                'shift_strength': torch.tensor(shift_meta['shift_strength'], dtype=torch.float32),
+                'source_domain': torch.tensor(sample['source_domain'], dtype=torch.long),
+                'is_ood': torch.tensor(max(shift_meta['is_shifted'], sample['is_domain_ood']), dtype=torch.float32),
+            }
         else:
-            return {'A': A, 'B': B, 'A_paths': A_path, 'B_paths': B_path}
+            return {
+                'A': A,
+                'B': B,
+                'A_paths': A_path,
+                'B_paths': B_path,
+                'is_shifted': torch.tensor(shift_meta['is_shifted'], dtype=torch.float32),
+                'shift_strength': torch.tensor(shift_meta['shift_strength'], dtype=torch.float32),
+                'source_domain': torch.tensor(sample['source_domain'], dtype=torch.long),
+                'is_ood': torch.tensor(max(shift_meta['is_shifted'], sample['is_domain_ood']), dtype=torch.float32),
+            }
         
 
 

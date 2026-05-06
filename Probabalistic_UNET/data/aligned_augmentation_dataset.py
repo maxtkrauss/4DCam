@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import cv2
+from data.input_perturbations import apply_optional_input_shift, build_aligned_samples
 
 """
 AlignedDataset for paired image-to-image translation tasks.
@@ -46,27 +47,12 @@ class AlignedAugmentationDataset(BaseDataset):
         self.polarization = opt.polarization
         self.video_mode = opt.video_mode
         self.GT_upsample = opt.GT_upsample
-        self.A_paths, self.B_paths = [], []
+        self.norm_bitwise = opt.norm_bitwise
         self.use_aug16 = bool(getattr(opt, 'use_aug16', False) and getattr(opt, 'isTrain', False))
         self.aug_transforms = generate_transforms() if self.use_aug16 else [(0, False, False)]
-
-        dir_A = os.path.join(opt.dataroot, opt.phase, 'thorlabs')
-        dir_B = os.path.join(opt.dataroot, opt.phase, 'cubert')
-
-        if os.path.exists(dir_A):
-            self.A_paths.extend(make_dataset(dir_A, opt.max_dataset_size))
-            if os.path.exists(dir_B):
-                self.B_paths.extend(make_dataset(dir_B, opt.max_dataset_size))
-            else:
-                a_paths_for_folder = make_dataset(dir_A, opt.max_dataset_size)
-                self.B_paths.extend(a_paths_for_folder)
-
-        self.A_paths = sorted(self.A_paths, key=natural_sort_key)
-        self.B_paths = sorted(self.B_paths, key=natural_sort_key)
-        print(f"A_paths: {self.A_paths}")
-        print(f"B_paths: {self.B_paths}")   
-        self.A_size = len(self.A_paths)
-        self.B_size = len(self.B_paths)
+        self.samples = build_aligned_samples(opt, sort_key=natural_sort_key)
+        self.A_size = len(self.samples)
+        self.B_size = len(self.samples)
 
         self.input_nc = self.opt.output_nc if self.opt.direction == 'BtoA' else self.opt.input_nc
         self.output_nc = self.opt.input_nc if self.opt.direction == 'BtoA' else self.opt.output_nc
@@ -79,8 +65,9 @@ class AlignedAugmentationDataset(BaseDataset):
         aug_idx = index // base_len
         img_idx = index % base_len
 
-        A_path = self.A_paths[img_idx]
-        B_path = self.B_paths[img_idx]
+        sample = self.samples[img_idx]
+        A_path = sample['A_path']
+        B_path = sample['B_path']
 
         A = io.imread(A_path).astype(np.float32)  # Shape: (5, 660, 660)
         if self.video_mode == False:
@@ -112,6 +99,8 @@ class AlignedAugmentationDataset(BaseDataset):
         if self.polarization == 135:
             A = A[3:4, :, :] # Shape: (1, 660, 660) (135 degree pol)
 
+        A, shift_meta = apply_optional_input_shift(A, self.opt)
+
         if self.GT_upsample:
             # Modify ground-truth size (bicubic interpolation)     
             B = upsample_bicubic(B, (660,660)) # Shape: (106, 660, 660)
@@ -130,6 +119,14 @@ class AlignedAugmentationDataset(BaseDataset):
         netG = self.opt.netG
         if netG == 'unet_128':
             A = F.interpolate(A, size=(128, 128), mode='bilinear', align_corners=False)
+        elif netG == 'nafnet_128':
+            A = F.interpolate(A, size=(128, 128), mode='bilinear', align_corners=False)
+        elif netG == 'nafnet_256':
+            A = F.interpolate(A, size=(256, 256), mode='bilinear', align_corners=False)
+        elif netG == 'nafnet_512':
+            A = F.interpolate(A, size=(512, 512), mode='bilinear', align_corners=False)
+        elif netG == 'nafnet_1024':
+            A = F.interpolate(A, size=(1024, 1024), mode='bilinear', align_corners=False)
         elif netG == 'unet_256':
             A = F.interpolate(A, size=(256, 256), mode='bilinear', align_corners=False)
         elif netG == 'unet_512':
@@ -169,5 +166,9 @@ class AlignedAugmentationDataset(BaseDataset):
             'B': B,
             'A_paths': A_path,
             'B_paths': B_path,
-            'aug_flag': (angle, flip_h, flip_v)
+            'aug_flag': (angle, flip_h, flip_v),
+            'is_shifted': torch.tensor(shift_meta['is_shifted'], dtype=torch.float32),
+            'shift_strength': torch.tensor(shift_meta['shift_strength'], dtype=torch.float32),
+            'source_domain': torch.tensor(sample['source_domain'], dtype=torch.long),
+            'is_ood': torch.tensor(max(shift_meta['is_shifted'], sample['is_domain_ood']), dtype=torch.float32),
         }

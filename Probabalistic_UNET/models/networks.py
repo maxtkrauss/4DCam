@@ -132,7 +132,18 @@ def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[]):
     return net
 
 
-def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, init_type='normal', init_gain=0.02, gpu_ids=[]):
+def apply_generator_output_activation(out, use_nll):
+    if use_nll:
+        if out.shape[1] % 2 != 0:
+            raise ValueError(f"use_nll requires an even number of output channels, got {out.shape[1]}")
+        n = out.shape[1] // 2
+        mu = torch.sigmoid(out[:, :n, :, :])
+        sigma = F.softplus(out[:, n:, :, :])
+        return torch.cat([mu, sigma], dim=1)
+    return torch.sigmoid(out)
+
+
+def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, init_type='normal', init_gain=0.02, gpu_ids=[], use_nll=False):
     """Create a generator
 
     Parameters:
@@ -167,17 +178,29 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
     elif netG == 'resnet_6blocks':
         net = ResnetGenerator(input_nc, output_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout, n_blocks=6)
     elif netG == 'unet_128':
-        net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
     elif netG == 'unet_256':
-        net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
     elif netG == 'unet_512':
-        net = UnetGenerator(input_nc, output_nc, 9, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator(input_nc, output_nc, 9, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
     elif netG == 'unet_1024':
-        net = UnetGenerator(input_nc, output_nc, 10, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator(input_nc, output_nc, 10, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
     elif netG == 'unet_1024_mod':
-        net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
     elif netG == 'unet_1024_to_256':
-        net = UnetGenerator256Out(input_nc, output_nc, 10, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+        net = UnetGenerator256Out(input_nc, output_nc, 10, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
+    elif netG == 'unet_2048':
+        net = UnetGenerator2048To410(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout, use_nll=use_nll)
+    elif netG == 'nafnet_128':
+        net = NAFNetGenerator(input_nc, output_nc, width=32, enc_blocks=(1, 1, 2), dec_blocks=(1, 1, 1), use_nll=use_nll)
+    elif netG == 'nafnet_256':
+        # Stronger/fairer NAFNet variant for this task: higher input resolution and more capacity.
+        net = NAFNetGenerator(input_nc, output_nc, width=48, enc_blocks=(1, 2, 2), dec_blocks=(1, 1, 1), use_nll=use_nll)
+    elif netG == 'nafnet_512':
+        net = NAFNetGenerator(input_nc, output_nc, width=48, enc_blocks=(1, 2, 2, 2), dec_blocks=(1, 1, 1, 1), use_nll=use_nll)
+    elif netG == 'nafnet_1024':
+        # Fair-input comparison variant: let NAFNet consume the same 1024x1024 scatterogram as unet_1024.
+        net = NAFNetGenerator(input_nc, output_nc, width=32, enc_blocks=(1, 1, 2, 2), dec_blocks=(1, 1, 1, 1), use_nll=use_nll)
 
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
@@ -461,7 +484,7 @@ class ResnetBlock(nn.Module):
 class UnetGenerator(nn.Module):
     """Create a Unet-based generator"""
 
-    def __init__(self, input_nc, output_nc, num_downs, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+    def __init__(self, input_nc, output_nc, num_downs, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, use_nll=False):
         """Construct a Unet generator
         Parameters:
             input_nc (int)  -- the number of channels in input images
@@ -483,7 +506,15 @@ class UnetGenerator(nn.Module):
         unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer)  # add the outermost layer
+        self.model = UnetSkipConnectionBlock(
+            output_nc,
+            ngf,
+            input_nc=input_nc,
+            submodule=unet_block,
+            outermost=True,
+            norm_layer=norm_layer,
+            use_nll=use_nll,
+        )  # add the outermost layer
 
     def forward(self, x):
         return self.model(x)
@@ -494,7 +525,7 @@ class UnetGenerator256Out(nn.Module):
     and produces output_nc channels (e.g., 212). Structure mirrors existing UnetGenerator.
     """
 
-    def __init__(self, input_nc, output_nc, num_downs=10, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+    def __init__(self, input_nc, output_nc, num_downs=10, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, use_nll=False):
         super(UnetGenerator256Out, self).__init__()
         # innermost
         unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None,
@@ -512,16 +543,52 @@ class UnetGenerator256Out(nn.Module):
         # OUTERMOST with 256x256 upsample (instead of 128/660)
         self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc,
                                              submodule=unet_block, outermost=True,
-                                             norm_layer=norm_layer)
+                                             norm_layer=norm_layer, use_nll=use_nll)
         # Replace the outermost 'up' to hit 256x256 exactly
         # (we reuse the created block but change its upsample head)
         up_layers = [
             nn.ReLU(inplace=False),
             nn.Upsample(size=(256, 256), mode='bilinear', align_corners=False),
             nn.Conv2d(ngf * 2, output_nc, kernel_size=3, stride=1, padding=1),
-            nn.Sigmoid()
         ]
         self.model.up = nn.Sequential(*up_layers)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class UnetGenerator2048To410(nn.Module):
+    """
+    Full-resolution U-Net option for Thorlabs-to-Cubert reconstruction.
+
+    The encoder consumes a 2048x2048 input. The outermost decoder head projects the
+    output channels to Cubert resolution, 410x410. In NLL mode, the final channels
+    are interpreted as [mu_1..mu_C, sigma_1..sigma_C] with sigmoid(mu) and
+    softplus(sigma), matching the cleaned probabilistic head used by the smaller
+    U-Net variants.
+    """
+
+    def __init__(self, input_nc, output_nc, num_downs=8, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, use_nll=False):
+        super(UnetGenerator2048To410, self).__init__()
+        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None,
+                                             submodule=None, norm_layer=norm_layer,
+                                             innermost=True)
+        for _ in range(num_downs - 5):
+            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None,
+                                                 submodule=unet_block, norm_layer=norm_layer,
+                                                 use_dropout=use_dropout)
+        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+
+        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc,
+                                             submodule=unet_block, outermost=True,
+                                             norm_layer=norm_layer, use_nll=use_nll)
+        self.model.up = nn.Sequential(
+            nn.ReLU(inplace=False),
+            nn.Upsample(size=(410, 410), mode='bilinear', align_corners=False),
+            nn.Conv2d(ngf * 2, output_nc, kernel_size=3, stride=1, padding=1),
+        )
 
     def forward(self, x):
         return self.model(x)
@@ -618,12 +685,14 @@ class UnetSkipConnectionBlock(nn.Module):
     """Defines the Unet submodule with skip connection, modified to return intermediate features and accept them."""
 
     def __init__(self, outer_nc, inner_nc, input_nc=None,
-                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False):
+                 submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False, use_nll=False):
         super(UnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
         self.innermost = innermost
         self.use_dropout = use_dropout
         self.submodule = submodule
+        self.use_nll = use_nll
+        self.output_nc = outer_nc
 
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
@@ -649,7 +718,6 @@ class UnetSkipConnectionBlock(nn.Module):
                 uprelu,
                 nn.Upsample(size=(128, 128), mode='bilinear', align_corners=False),
                 nn.Conv2d(inner_nc * 2, outer_nc, kernel_size=3, stride=1, padding=1),
-                nn.Sigmoid()
             )
 
         # (106x660x660) output
@@ -714,13 +782,127 @@ class UnetSkipConnectionBlock(nn.Module):
         # print(f"After upsampling: {out_up.shape}")
 
         if self.outermost:
+            if self.use_nll:
+                if self.output_nc % 2 != 0:
+                    raise ValueError(f"use_nll requires an even output_nc, got {self.output_nc}")
+                n = self.output_nc // 2
+                mu = torch.sigmoid(out_up[:, :n, :, :])
+                sigma = F.softplus(out_up[:, n:, :, :])
+                return torch.cat([mu, sigma], dim=1), sub_feats
             # print(f"Final Output Shape (Outermost): {out_up.shape}")
-            return out_up, sub_feats
+            return torch.sigmoid(out_up), sub_feats
 
         output = torch.cat([x, out_up], 1)  # Skip connection
         # print(f"After Skip Connection: {output.shape}")
 
         return output, sub_feats
+
+
+class SimpleGate(nn.Module):
+    def forward(self, x):
+        x1, x2 = x.chunk(2, dim=1)
+        return x1 * x2
+
+
+class LayerNorm2dNAF(nn.Module):
+    def __init__(self, channels, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(1, channels, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(1, channels, 1, 1))
+        self.eps = eps
+
+    def forward(self, x):
+        mean = x.mean(dim=1, keepdim=True)
+        var = (x - mean).pow(2).mean(dim=1, keepdim=True)
+        x = (x - mean) / torch.sqrt(var + self.eps)
+        return x * self.weight + self.bias
+
+
+class NAFBlock(nn.Module):
+    def __init__(self, channels, dw_expand=2, ffn_expand=2):
+        super().__init__()
+        dw_channels = channels * dw_expand
+        ffn_channels = channels * ffn_expand
+
+        self.norm1 = LayerNorm2dNAF(channels)
+        self.pw1 = nn.Conv2d(channels, dw_channels, kernel_size=1, stride=1, padding=0)
+        self.dwconv = nn.Conv2d(dw_channels, dw_channels, kernel_size=3, stride=1, padding=1, groups=dw_channels)
+        self.sg = SimpleGate()
+        self.pw2 = nn.Conv2d(dw_channels // 2, channels, kernel_size=1, stride=1, padding=0)
+
+        self.norm2 = LayerNorm2dNAF(channels)
+        self.ffn1 = nn.Conv2d(channels, ffn_channels * 2, kernel_size=1, stride=1, padding=0)
+        self.ffn_sg = SimpleGate()
+        self.ffn2 = nn.Conv2d(ffn_channels, channels, kernel_size=1, stride=1, padding=0)
+
+        self.beta = nn.Parameter(torch.zeros(1, channels, 1, 1))
+        self.gamma = nn.Parameter(torch.zeros(1, channels, 1, 1))
+
+    def forward(self, x):
+        y = self.norm1(x)
+        y = self.pw1(y)
+        y = self.dwconv(y)
+        y = self.sg(y)
+        y = self.pw2(y)
+        x = x + y * self.beta
+
+        z = self.norm2(x)
+        z = self.ffn1(z)
+        z = self.ffn_sg(z)
+        z = self.ffn2(z)
+        return x + z * self.gamma
+
+
+class NAFNetGenerator(nn.Module):
+    def __init__(self, input_nc, output_nc, width=32, enc_blocks=(1, 1, 2), dec_blocks=(1, 1, 1), use_nll=False):
+        super().__init__()
+        self.use_nll = use_nll
+        self.intro = nn.Conv2d(input_nc, width, kernel_size=3, stride=1, padding=1)
+
+        self.encoders = nn.ModuleList()
+        self.downs = nn.ModuleList()
+        channels = width
+        for num_blocks in enc_blocks:
+            self.encoders.append(nn.Sequential(*[NAFBlock(channels) for _ in range(num_blocks)]))
+            self.downs.append(nn.Conv2d(channels, channels * 2, kernel_size=2, stride=2))
+            channels *= 2
+
+        self.middle = nn.Sequential(*[NAFBlock(channels) for _ in range(2)])
+
+        self.ups = nn.ModuleList()
+        self.decoders = nn.ModuleList()
+        for num_blocks in dec_blocks:
+            self.ups.append(
+                nn.Sequential(
+                    # PixelShuffle(2) reduces channels by 4, so produce 2x input channels here
+                    # to halve the feature width and match the corresponding skip tensor.
+                    nn.Conv2d(channels, channels * 2, kernel_size=1, stride=1, padding=0),
+                    nn.PixelShuffle(2),
+                )
+            )
+            channels //= 2
+            self.decoders.append(nn.Sequential(*[NAFBlock(channels) for _ in range(num_blocks)]))
+
+        self.ending = nn.Conv2d(width, output_nc, kernel_size=3, stride=1, padding=1)
+
+    def forward(self, x):
+        x = self.intro(x)
+        skips = []
+        for encoder, down in zip(self.encoders, self.downs):
+            x = encoder(x)
+            skips.append(x)
+            x = down(x)
+
+        x = self.middle(x)
+
+        for up, decoder, skip in zip(self.ups, self.decoders, reversed(skips)):
+            x = up(x)
+            x = x + skip
+            x = decoder(x)
+
+        out = self.ending(x)
+        out = apply_generator_output_activation(out, self.use_nll)
+        return out, []
 
 
 '''

@@ -15,10 +15,12 @@ from copy import deepcopy
 
 import torch
 import torch.utils.data
+from torch.optim import Adam
 from torchvision.transforms import transforms
 
 # Import everything from main.py to ensure identical behavior
 from models.mobilenetv3 import mobilenet_v3_large
+from regime_model import SharedProjectionStemMobileNetV3Large
 from utils.dataset import ImageFolder
 from utils.transforms import (MultiChannelResize, MultiChannelRandomHorizontalFlip, 
                                MultiChannelRandomVerticalFlip, MultiChannelNormalize, 
@@ -247,16 +249,30 @@ def train_one_fold(train_dir, test_dir, args, fold_idx):
     
     # EXACT same model setup as main.py
     # CRITICAL: Model must use the number of channels AFTER transform (1 if grayscale, otherwise original)
-    model = mobilenet_v3_large(
-        num_classes=len(train_dataset.classes), 
-        in_channels=normalization_channels,
-        dropout=args.dropout
-    ).to(device)
+    model_variant = getattr(args, "model_variant", "baseline").lower()
+    projection_channels = getattr(args, "projection_channels", 16)
+    if model_variant == "shared_projection_stem":
+        model = SharedProjectionStemMobileNetV3Large(
+            in_channels=normalization_channels,
+            num_classes=len(train_dataset.classes),
+            dropout=args.dropout,
+            projection_channels=projection_channels,
+        ).to(device)
+    else:
+        model = mobilenet_v3_large(
+            num_classes=len(train_dataset.classes),
+            in_channels=normalization_channels,
+            dropout=args.dropout
+        ).to(device)
     
     # EXACT same optimizer/scheduler/criterion as main.py
     parameters = utils.add_weight_decay(model, weight_decay=args.weight_decay)
     criterion = utils.CrossEntropyLoss(label_smoothing=args.label_smoothing)
-    optimizer = utils.RMSprop(parameters, lr=args.lr, alpha=0.9, eps=1e-3, weight_decay=0, momentum=args.momentum)
+    optimizer_name = getattr(args, "optimizer", "rmsprop").lower()
+    if optimizer_name == "adam":
+        optimizer = Adam(parameters, lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        optimizer = utils.RMSprop(parameters, lr=args.lr, alpha=0.9, eps=1e-3, weight_decay=0, momentum=args.momentum)
     scheduler = utils.StepLR(
         optimizer,
         step_size=args.lr_step_size,
@@ -331,6 +347,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--optimizer', choices=['rmsprop', 'adam'], default='rmsprop')
     parser.add_argument('--momentum', type=float, default=0.9)
     parser.add_argument('--weight-decay', type=float, default=0.0)
     parser.add_argument('--lr-step-size', type=int, default=20)
@@ -338,6 +355,8 @@ def main():
     parser.add_argument('--warmup-epochs', type=int, default=0)
     parser.add_argument('--warmup-lr-init', type=float, default=0)
     parser.add_argument('--dropout', type=float, default=0.0)
+    parser.add_argument('--model-variant', choices=['baseline', 'shared_projection_stem'], default='baseline')
+    parser.add_argument('--projection-channels', type=int, default=16)
     parser.add_argument('--label-smoothing', type=float, default=0.0)
     parser.add_argument('--num-channels', type=int, default=None, help='number of input channels (default: auto-detect from dataset)')
     parser.add_argument('--workers', type=int, default=16)

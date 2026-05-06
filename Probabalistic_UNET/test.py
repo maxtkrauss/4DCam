@@ -27,6 +27,7 @@ See training and test tips at: https://github.com/junyanz/pytorch-CycleGAN-and-p
 See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/qa.md
 """
 import os
+import csv
 from options.test_options import TestOptions
 from data import create_dataset
 from models import create_model
@@ -67,6 +68,7 @@ if __name__ == '__main__':
     # For [CycleGAN]: It should not affect CycleGAN as CycleGAN uses instancenorm without dropout.
     if opt.eval:
         model.eval()
+    prediction_records = []
     for i, data in enumerate(dataset):
         if i >= opt.num_test:  # only apply our model to opt.num_test images.
             break
@@ -78,4 +80,15 @@ if __name__ == '__main__':
         if i % 5 == 0:  # save images to an HTML file
             print('processing (%04d)-th image... %s' % (i, img_path))
         save_images(webpage, visuals, i, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize, use_wandb=opt.use_wandb)
+        if opt.save_eval_metadata:
+            record = {'index': i, 'image_path': img_path[0] if isinstance(img_path, (list, tuple)) else img_path}
+            record.update(model.get_current_metrics())
+            prediction_records.append(record)
     webpage.save()  # save the HTML
+    if opt.save_eval_metadata and prediction_records:
+        csv_path = os.path.join(web_dir, 'prediction_metadata.csv')
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=list(prediction_records[0].keys()))
+            writer.writeheader()
+            writer.writerows(prediction_records)
+        print(f'Wrote prediction metadata to {csv_path}')
