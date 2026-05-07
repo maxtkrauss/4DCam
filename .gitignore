@@ -1,2 +1,117 @@
-Spectral_Calibration/
+# 4DCam repository hygiene
+#
+# Keep source code, small reference tables, docs, and lightweight figures in Git.
+# Keep generated data, model weights, local environments, cache files, videos,
+# and machine-specific outputs outside Git.
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Virtual environments and package artifacts
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# IDE and OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Local secrets and machine-specific config
+.env
+.env.*
+*.local
 data_pull.py
+
+# Raw/processed datasets and large arrays
+data/
+datasets/
+dataset/
+raw/
+processed/
+splits/
+*.npy
+*.npz
+*.mat
+*.h5
+*.hdf5
+
+# Image/video outputs. Small curated docs figures can be force-added if needed.
+*.tif
+*.tiff
+*.bmp
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Model checkpoints and training state
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
+*.pickle
+checkpoint*
+checkpoints/
+checkpoints_*/
+**/checkpoint.pt
+**/latest_net_*.pth
+**/*_net_*.pth
+
+# Generated experiment folders
+results/
+outputs/
+runs/
+wandb/
+logs/
+metrics/
+metrics_*/
+*_results/
+*_outputs/
+*_eval/
+*_retrain/
+*_scratch/
+
+# Reconstruction/classification generated artifacts
+Probabalistic_UNET/results/
+Probabalistic_UNET/metrics_prob_nll/
+Probabalistic_UNET/metrics_*/
+Probabalistic_UNET/MAE_head_study/results/
+Probabalistic_UNET/MAE_head_study/outputs/
+Probabalistic_UNET/NOISE_study/results/
+Probabalistic_UNET/NOISE_study/outputs/
+Classification/**/checkpoints*/
+Classification/**/results/
+Classification/**/regime_results*/
+Classification/**/roi_feature_results/
+Classification/**/fold*_charts/
+Classification/**/fold*_*.png
+Classification/**/fold*_*.svg
+Classification/**/fold*_*.csv
+
+# Preserve compact reference artifacts intentionally added for reproducibility.
+!Classification/roi_svm/reference_results/
+!Classification/roi_svm/reference_results/**
+!Classification/roi_svm/notes/
+!Classification/roi_svm/notes/**
+!figures/
+!figures/**
+
+# Local scratch leftovers
+squeue
+fi
+}

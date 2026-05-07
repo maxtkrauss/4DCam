@@ -62,6 +62,10 @@ def save_tif(image_numpy, image_dir, idx, name, label, aspect_ratio=1.0):
         out_name = 'cb_raw_%s_%s.tif' % (name, idx)
     elif 'fake_B' in label:
         out_name = 'tl_gen_%s_%s.tif' % (name, idx)
+    elif 'risk_B' in label:
+        out_name = 'tl_risk_%s_%s.tif' % (name, idx)
+    elif 'ood_B' in label:
+        out_name = 'tl_ood_%s_%s.tif' % (name, idx)
     elif 'real_A' in label:
         out_name = 'tl_gen_%s_%s.tif' % (name, idx)
     else:

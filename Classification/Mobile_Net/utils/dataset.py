@@ -6,6 +6,32 @@ from tifffile import imread
 import torch
 
 
+def _normalize_multichannel_to_chw(arr):
+    """Normalize a 3D array to (C, H, W).
+
+    For hyperspectral tensors, channel count may be larger than spatial dims, so
+    "smallest dimension is channels" is not reliable.
+    """
+    if arr.ndim == 2:
+        return arr[np.newaxis, :, :]
+
+    if arr.ndim != 3:
+        raise ValueError(f"Expected 2D or 3D image, got shape {arr.shape}")
+
+    if arr.shape[1] == arr.shape[2]:
+        return arr
+
+    if arr.shape[0] == arr.shape[1]:
+        return np.transpose(arr, (2, 0, 1))
+
+    if arr.shape[0] <= 8 and arr.shape[1] > 32 and arr.shape[2] > 32:
+        return arr
+    if arr.shape[2] <= 8 and arr.shape[0] > 32 and arr.shape[1] > 32:
+        return np.transpose(arr, (2, 0, 1))
+
+    return arr
+
+
 class ImageFolder(data.Dataset):
 
     def __init__(self, root, transform=None, num_channels=None, normalize_per_channel=True):
@@ -23,11 +49,8 @@ class ImageFolder(data.Dataset):
                 if arr.ndim == 2:
                     self.num_channels = 1
                 elif arr.ndim == 3:
-                    # Check if it's (C, H, W) or (H, W, C)
-                    if arr.shape[0] < arr.shape[1] and arr.shape[0] < arr.shape[2]:
-                        self.num_channels = arr.shape[0]
-                    else:
-                        self.num_channels = arr.shape[2]
+                    arr = _normalize_multichannel_to_chw(arr)
+                    self.num_channels = arr.shape[0]
             else:
                 self.num_channels = 3  # RGB
             print(f"Auto-detected {self.num_channels} channels from dataset")
@@ -52,17 +75,7 @@ class ImageFolder(data.Dataset):
             arr = imread(path, is_ome=False)  # Shape: (C, H, W) or (H, W) or (H, W, C)
             
             # Normalize to (C, H, W) format
-            if arr.ndim == 2:
-                # Grayscale (H, W) -> (1, H, W)
-                arr = arr[np.newaxis, :, :]
-            elif arr.ndim == 3:
-                # Check if it's (C, H, W) or (H, W, C)
-                if arr.shape[0] < arr.shape[1] and arr.shape[0] < arr.shape[2]:
-                    # Already (C, H, W)
-                    pass
-                else:
-                    # (H, W, C) -> (C, H, W)
-                    arr = np.transpose(arr, (2, 0, 1))
+            arr = _normalize_multichannel_to_chw(arr)
             
             # Limit to num_channels if specified
             if self.num_channels is not None and arr.shape[0] > self.num_channels:
